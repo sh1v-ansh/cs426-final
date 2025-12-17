@@ -77,7 +77,9 @@ services:
     # ============ CUSTOM FASTAPI SERVICES ============
 
   courses:
-    build: ./services/courses
+    build:
+      context: .
+      dockerfile: ./services/courses/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres-courses:5432/courses_db
       REDIS_URL: redis://redis:6379
@@ -92,7 +94,9 @@ services:
       replicas: 1  # Will scale this via docker-compose up --scale
 
   students:
-    build: ./services/students
+    build:
+      context: .
+      dockerfile: ./services/students/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres-students:5432/students_db
       REDIS_URL: redis://redis:6379
@@ -107,7 +111,9 @@ services:
       replicas: 1
 
   enrollment:
-    build: ./services/enrollment
+    build:
+      context: .
+      dockerfile: ./services/enrollment/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres-enrollments:5432/enrollments_db
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/

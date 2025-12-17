@@ -38,91 +38,110 @@ def list_students(session: Session = Depends(get_session)):
     GET /students - List all students
     Returns: Array of all students
     """
-    # TODO: Query all students from database
-    pass
+    students = session.exec(select(Student)).all()
+    return students
 
 
 @app.get("/students/{student_id}", response_model=Student)
 def get_student(student_id: int, session: Session = Depends(get_session)):
     """
     GET /students/{student_id} - Get student details (CACHED)
-    
+
     Cache-Aside Pattern:
     1. Check Redis cache first
     2. If cache miss, query database
     3. Store result in cache (TTL: 300 seconds)
     4. Return student
-    
-    Why cache? 
+
+    Why cache?
     - Every enrollment checks student's completed_courses
     - High read volume during registration
     - completed_courses rarely changes (only when course is completed)
     """
-    # TODO:
-    # 1. Try Redis: redis_client.get(f"student:{student_id}")
-    # 2. If cache hit, return json.loads(cached_data)
-    # 3. If cache miss:
-    #    - Query database
-    #    - Cache result: redis_client.setex(f"student:{student_id}", 300, json.dumps(student.dict()))
-    # 4. Return student
-    pass
+    # Try to get from Redis cache first
+    cached_data = redis_client.get(f"student:{student_id}")
+    if cached_data:
+        return json.loads(cached_data)
+
+    # Cache miss - query database
+    student = session.get(Student, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Store in Redis cache with 300 second TTL
+    redis_client.setex(f"student:{student_id}", 300, json.dumps(student.dict()))
+    return student
 
 
 @app.post("/students", response_model=Student, status_code=201)
 def create_student(student: Student, session: Session = Depends(get_session)):
     """
     POST /students - Create a new student
-    
+
     Request body:
     {
         "name": "John Doe",
         "completed_courses": ["CS187", "CS220"]
     }
-    
+
     Returns: Created student with assigned ID
     """
-    # TODO:
-    # 1. Add student to database
-    # 2. Commit and refresh
-    # 3. Return created student
-    pass
+    session.add(student)
+    session.commit()
+    session.refresh(student)
+    return student
 
 
 @app.put("/students/{student_id}", response_model=Student)
 def update_student(
-    student_id: int, 
-    student_update: Student, 
+    student_id: int,
+    student_update: Student,
     session: Session = Depends(get_session)
 ):
     """
     PUT /students/{student_id} - Update student details
-    
+
     Used to:
     - Add completed courses after semester ends
     - Update student name
-    
+
     IMPORTANT: Invalidate cache after update
     """
-    # TODO:
-    # 1. Get student from database
-    # 2. Update fields (name, completed_courses)
-    # 3. Commit changes
-    # 4. Invalidate cache: redis_client.delete(f"student:{student_id}")
-    # 5. Return updated student
-    pass
+    student = session.get(Student, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Update fields
+    if student_update.name:
+        student.name = student_update.name
+    if student_update.completed_courses is not None:
+        student.completed_courses = student_update.completed_courses
+
+    session.add(student)
+    session.commit()
+    session.refresh(student)
+
+    # Invalidate cache
+    redis_client.delete(f"student:{student_id}")
+
+    return student
 
 
 @app.delete("/students/{student_id}", status_code=204)
 def delete_student(student_id: int, session: Session = Depends(get_session)):
     """
     DELETE /students/{student_id} - Delete a student
-    
+
     IMPORTANT: Invalidate cache after deletion
     """
-    # TODO:
-    # 1. Get student from database
-    # 2. Delete student
-    # 3. Commit transaction
-    # 4. Invalidate cache: redis_client.delete(f"student:{student_id}")
-    # 5. Return 204 No Content
-    pass
+    student = session.get(Student, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    session.delete(student)
+    session.commit()
+
+    # Invalidate cache
+    redis_client.delete(f"student:{student_id}")
+
+    return None
