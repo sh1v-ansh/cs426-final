@@ -1,0 +1,151 @@
+version: '3.8'
+
+services:  
+  # database-per-service pattern means we have one database per service
+  postgres-courses:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: courses_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-courses-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-students:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: students_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-students-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-enrollments:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: enrollments_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-enrollments-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"  
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+    # ============ CUSTOM FASTAPI SERVICES ============
+
+  courses:
+    build: ./services/courses
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres-courses:5432/courses_db
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres-courses:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8001"  # Internal port, multiple instances will use different host ports
+    deploy:
+      replicas: 1  # Will scale this via docker-compose up --scale
+
+  students:
+    build: ./services/students
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres-students:5432/students_db
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres-students:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8002"
+    deploy:
+      replicas: 1
+
+  enrollment:
+    build: ./services/enrollment
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres-enrollments:5432/enrollments_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      COURSES_SERVICE_URL: http://courses:8001
+      STUDENTS_SERVICE_URL: http://students:8002
+    depends_on:
+      postgres-enrollments:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      courses:
+        condition: service_started
+      students:
+        condition: service_started
+    ports:
+      - "8003"
+    deploy:
+      replicas: 1
+
+  # ============ API GATEWAY & LOAD BALANCER ============
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - courses
+      - students
+      - enrollment
+    restart: unless-stopped
+
+volumes:
+  postgres-courses-data:
+  postgres-students-data:
+  postgres-enrollments-data:
+
+networks:
+  default:
+    name: mini-spire-network
