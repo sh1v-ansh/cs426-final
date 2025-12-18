@@ -105,12 +105,30 @@ def enroll_student(request: EnrollmentRequest):
     # 3. Validate prerequisites
     required = course.get("prerequisites", [])
     completed = student.get("completed_courses", [])
-    if not all(req in completed for req in required):
-        raise HTTPException(status_code=400, detail="Prerequisites not met")
+
+    print(f"[DEBUG] Validating prerequisites for student {request.student_id} enrolling in course {request.course_id}")
+    print(f"[DEBUG] Required prerequisites: {required}")
+    print(f"[DEBUG] Student completed courses: {completed}")
+
+    # Check each prerequisite individually for better debugging
+    missing_prereqs = []
+    for prereq in required:
+        if prereq not in completed:
+            missing_prereqs.append(prereq)
+
+    if missing_prereqs:
+        error_msg = f"Prerequisites not met. Missing: {', '.join(missing_prereqs)}"
+        print(f"[DEBUG] Prerequisite validation FAILED: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    print(f"[DEBUG] Prerequisite validation PASSED")
 
     # 4. Validate capacity
     if course["enrolled"] >= course["capacity"]:
+        print(f"[DEBUG] Capacity validation FAILED: {course['enrolled']}/{course['capacity']}")
         raise HTTPException(status_code=400, detail="Course is full")
+
+    print(f"[DEBUG] Capacity validation PASSED: {course['enrolled']}/{course['capacity']}")
 
     # 5. Publish to RabbitMQ
     connection, channel = get_rabbitmq_channel()
