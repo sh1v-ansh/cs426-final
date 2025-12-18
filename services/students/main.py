@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import SQLModel, Session, create_engine, select
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 import redis
 import json
 import sys
@@ -23,6 +24,13 @@ def on_startup():
 def get_session():
     with Session(engine) as session:
         yield session
+
+# ============ PYDANTIC MODELS ============
+
+class StudentUpdate(BaseModel):
+    """Model for partial student updates - all fields optional"""
+    name: Optional[str] = None
+    completed_courses: Optional[List[str]] = None
 
 # ============ ENDPOINTS ============
 
@@ -95,15 +103,17 @@ def create_student(student: Student, session: Session = Depends(get_session)):
 @app.put("/students/{student_id}", response_model=Student)
 def update_student(
     student_id: int,
-    student_update: Student,
+    student_update: StudentUpdate,
     session: Session = Depends(get_session)
 ):
     """
-    PUT /students/{student_id} - Update student details
+    PUT /students/{student_id} - Update student details (partial updates supported)
 
     Used to:
     - Add completed courses after semester ends
     - Update student name
+
+    All fields are optional - only provided fields will be updated.
 
     IMPORTANT: Invalidate cache after update
     """
@@ -111,11 +121,10 @@ def update_student(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # Update fields
-    if student_update.name:
-        student.name = student_update.name
-    if student_update.completed_courses is not None:
-        student.completed_courses = student_update.completed_courses
+    # Update only provided fields
+    update_data = student_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(student, field, value)
 
     session.add(student)
     session.commit()

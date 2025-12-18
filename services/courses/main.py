@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import SQLModel, Session, create_engine, select
 from typing import List, Optional
+from pydantic import BaseModel
 import redis
 import json
 import os
@@ -25,6 +26,16 @@ def on_startup():
 def get_session():
     with Session(engine) as session:
         yield session
+
+# ============ PYDANTIC MODELS ============
+
+class CourseUpdate(BaseModel):
+    """Model for partial course updates - all fields optional"""
+    name: Optional[str] = None
+    code: Optional[str] = None
+    capacity: Optional[int] = None
+    enrolled: Optional[int] = None
+    prerequisites: Optional[List[str]] = None
 
 # ============ ENDPOINTS ============
 
@@ -97,16 +108,18 @@ def create_course(course: Course, session: Session = Depends(get_session)):
 @app.put("/courses/{course_id}", response_model=Course)
 def update_course(
     course_id: int,
-    course_update: Course,
+    course_update: CourseUpdate,
     session: Session = Depends(get_session)
 ):
     """
-    PUT /courses/{course_id} - Update course details
+    PUT /courses/{course_id} - Update course details (partial updates supported)
 
     Used to:
     - Update enrolled count when student enrolls
     - Update capacity
     - Update prerequisites
+
+    All fields are optional - only provided fields will be updated.
 
     IMPORTANT: Invalidate cache after update
     """
@@ -114,17 +127,10 @@ def update_course(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    # Update fields
-    if course_update.name:
-        course.name = course_update.name
-    if course_update.code:
-        course.code = course_update.code
-    if course_update.capacity is not None:
-        course.capacity = course_update.capacity
-    if course_update.enrolled is not None:
-        course.enrolled = course_update.enrolled
-    if course_update.prerequisites is not None:
-        course.prerequisites = course_update.prerequisites
+    # Update only provided fields
+    update_data = course_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(course, field, value)
 
     session.add(course)
     session.commit()
